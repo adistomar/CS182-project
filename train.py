@@ -128,11 +128,20 @@ ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torc
 ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
 # poor man's data loader
-data_dir = os.path.join('data', dataset)
-with open(os.path.join(data_dir, 'meta.pkl'), 'rb') as f:
-    meta = pickle.load(f)
-stoi, itos = meta['stoi'], meta['itos']
-vocab_size = meta['vocab_size'] 
+# data_dir = os.path.join('data', dataset)
+# with open(os.path.join(data_dir, 'meta.pkl'), 'rb') as f:
+#     meta = pickle.load(f)
+
+# vocab ----------------------------------------------------------------
+ALPHABET      = [chr(i) for i in range(ord('a'), ord('z') + 1)]
+SEP_TOKENS    = ['|', '?']
+VOCAB         = ALPHABET + SEP_TOKENS
+stoi          = {ch: i for i, ch in enumerate(VOCAB)}
+itos          = {i: ch for ch, i in stoi.items()}
+
+encode_vec    = np.vectorize(lambda c: stoi[c], otypes=[np.uint8])
+# vocab_size = meta['vocab_size'] 
+vocab_size = len(VOCAB)
 print(f"Using vocab size of {vocab_size} (a-z + separators)", flush=True)
 
 # ---------------- helper: random mono‑alphabetic key --------
@@ -144,21 +153,17 @@ def random_key():
     return enc, dec
 
 def get_batch(split):
-    mmap = np.memmap(os.path.join(data_dir, f'{split}.bin'),
-                     dtype=np.uint8, mode='r')
-
-    k_pairs   = 1024                              # desired number of pairs
-    known_k   = k_pairs - 1                       # last one is the query
-    prompt_sz = 2 * k_pairs                       # 2048 tokens
+    k_pairs = 1024                              # desired number of pairs
+    known_k = k_pairs - 1                       # last one is the query
+    prompt_sz = 2 * k_pairs                     # 2048 tokens
     assert prompt_sz == block_size, "block_size must be 2*k_pairs"
 
-    X = torch.full((batch_size, block_size), stoi['|'],  dtype=torch.long)
-    Y = torch.full((batch_size, block_size), -1,          dtype=torch.long)
+    X = torch.full((batch_size, block_size), stoi['|'], dtype=torch.long)
+    Y = torch.full((batch_size, block_size), -1, dtype=torch.long)
 
     for b in range(batch_size):
-        # ----- 1. grab k plaintext letters from corpus -------------------
-        start = np.random.randint(0, len(mmap) - k_pairs - 1)
-        plain = mmap[start:start + k_pairs].copy()          # np.uint8, shape (k_pairs,)
+        # ----- 1. generate k random plaintext letters -------------------
+        plain = np.random.choice(alpha_ids, size=k_pairs, replace=True)
 
         # ----- 2. fresh random key for this sample -----------------------
         enc, _ = random_key()
@@ -168,12 +173,13 @@ def get_batch(split):
         for i, p in enumerate(plain):
             c = enc[p]
             if i < known_k:                                 # give answer
-                buf.extend([c, p]);      tgt.extend([-1, p])
+                buf.extend([c, p])
+                tgt.extend([-1, p])
             else:                                           # query pair
                 buf.extend([c, stoi['?']])
                 tgt.extend([-1, p])
 
-        X[b] = torch.from_numpy(np.asarray(buf,  np.uint8))
+        X[b] = torch.from_numpy(np.asarray(buf, np.uint8))
         Y[b] = torch.from_numpy(np.asarray(tgt, np.int64))
 
     if device_type == 'cuda':
