@@ -37,7 +37,7 @@ import re
 out_dir = 'out'
 eval_interval = 1000
 log_interval = 1
-save_interval = 1000
+save_interval = 100
 eval_iters = 200
 eval_only = False # if True, script exits right after the first eval
 always_save_checkpoint = True # if True, always save a checkpoint after each eval
@@ -158,8 +158,8 @@ def get_batch(split):
     prompt_sz = 2 * k_pairs                     # 2048 tokens
     assert prompt_sz == block_size, "block_size must be 2*k_pairs"
 
-    X = torch.full((batch_size, block_size), stoi['|'], dtype=torch.long)
-    Y = torch.full((batch_size, block_size), -1, dtype=torch.long)
+    X = torch.full((batch_size, block_size - 1), stoi['|'], dtype=torch.long)
+    Y = torch.full((batch_size, block_size - 1), -1, dtype=torch.long)
 
     for b in range(batch_size):
         # ----- 1. generate k random plaintext letters -------------------
@@ -174,10 +174,13 @@ def get_batch(split):
             c = enc[p]
             if i < known_k:                                 # give answer
                 buf.extend([c, p])
-                tgt.extend([-1, p])
+                tgt.extend([p, -1]) 
+                # tgt.extend([-1, p])
             else:                                           # query pair
-                buf.extend([c, stoi['?']])
-                tgt.extend([-1, p])
+                # buf.extend([c, stoi['?']])
+                # tgt.extend([-1, p])
+                buf.extend([c])  
+                tgt.extend([p])  
 
         X[b] = torch.from_numpy(np.asarray(buf, np.uint8))
         Y[b] = torch.from_numpy(np.asarray(tgt, np.int64))
